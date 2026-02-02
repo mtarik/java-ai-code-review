@@ -2,11 +2,41 @@
 
 Système automatisé de revue de code Java utilisant l'IA Claude d'Anthropic. Ce système s'exécute automatiquement à chaque commit ou pull request pour analyser la qualité du code Java.
 
-## 🌟 Deux modes d'utilisation
+## 🚀 Déploiement Ultra-Rapide (2 Commandes)
 
-Ce système peut être déployé de **deux façons** :
+**Activez le bot sur TOUS vos repositories Java en 2 commandes:**
 
-### 🌐 Mode Centralisé (Recommandé pour plusieurs repositories)
+```bash
+git clone https://github.com/mtarik/java-ai-code-review.git
+cd java-ai-code-review
+
+# 1. Déployer sur tous les repos Java
+./deploy-to-all-repos.sh
+
+# 2. Configurer les secrets
+./setup-secrets.sh
+```
+
+**✨ C'est tout!** Le bot est maintenant actif sur tous vos repositories Java.
+
+**➡️ [Guide complet du déploiement automatique](ZERO_CONFIG_GUIDE.md)**
+
+---
+
+## 🌟 Modes d'utilisation
+
+### ⚡ Mode Automatique (Recommandé - 2 commandes)
+
+**Déployez sur tous vos repos Java automatiquement:**
+
+- ✅ **2 commandes** et c'est configuré partout
+- ✅ **Détection automatique** de tous vos repos Java
+- ✅ **Configuration des secrets** en masse
+- ✅ **Maintenance centralisée** : 1 update = tous les repos mis à jour
+
+**➡️ [Guide du déploiement automatique](ZERO_CONFIG_GUIDE.md)**
+
+### 🌐 Mode Centralisé Manuel (Pour les organisations)
 
 Utilisez **un seul repository central** pour gérer la revue de code sur **tous vos projets Java**.
 
