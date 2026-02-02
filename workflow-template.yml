@@ -1,0 +1,64 @@
+# ════════════════════════════════════════════════════════════════════════════
+# 🤖 Template de Workflow - Revue de Code IA Centralisée
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Copiez ce fichier dans vos repositories Java à l'emplacement:
+# .github/workflows/ai-code-review.yml
+#
+# Configuration requise:
+# - Ajouter le secret ANTHROPIC_API_KEY dans les settings du repository
+#
+# ════════════════════════════════════════════════════════════════════════════
+
+name: 🤖 AI Code Review
+
+on:
+  # Se déclenche sur les Pull Requests
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.java'
+
+  # Se déclenche sur les commits (optionnel - commentez si non désiré)
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+      - 'feat/**'
+      - 'hotfix/**'
+    paths:
+      - '**.java'
+
+  # Permet le déclenchement manuel
+  workflow_dispatch:
+
+jobs:
+  call-ai-review:
+    name: 📊 Analyse IA du code Java
+    
+    # ⚠️ IMPORTANT: Remplacez "mtarik" par votre nom d'utilisateur GitHub
+    uses: mtarik/java-ai-code-review/.github/workflows/reusable-ai-review.yml@main
+
+    with:
+      # Version de Java (17, 11, 8, 21, etc.)
+      java-version: '17'
+
+      # Outil de build: 'auto', 'maven', ou 'gradle'
+      build-tool: 'auto'
+
+      # Activer les analyses statiques (Checkstyle, PMD)
+      enable-static-analysis: true
+
+      # Poster des commentaires sur la Pull Request
+      post-pr-comment: true
+
+      # Échouer le workflow si des problèmes critiques sont détectés
+      fail-on-critical: false
+
+    secrets:
+      # La clé API Anthropic doit être configurée dans les secrets du repository
+      # Settings → Secrets and variables → Actions → New repository secret
+      # Nom: ANTHROPIC_API_KEY
+      # Valeur: Votre clé API Anthropic (sk-ant-...)
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
