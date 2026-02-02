@@ -164,13 +164,15 @@ jobs:
         if: always() && steps.changed-files.outputs.found == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ai-review-report-${{ github.sha }}
+          name: ai-review-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             code_review_*.md
             code_review_*.json
+            review_report.json
+            review_report.md
           retention-days: 30
 
-      - name: 💬 Commenter la Pull Request
+      - name: 💬 Créer un Review avec commentaires sur les lignes
         if: github.event_name == 'pull_request' && steps.changed-files.outputs.found == 'true' && inputs.post-pr-comment
         uses: actions/github-script@v7
         with:
@@ -178,28 +180,170 @@ jobs:
           script: |
             const fs = require('fs');
 
-            let reportContent = '## 🤖 Revue de Code IA - Résultats\n\n';
-
+            // Lire le rapport JSON
             const files = fs.readdirSync('.');
-            const mdFile = files.find(f => f.startsWith('code_review_') && f.endsWith('.md'));
+            const jsonFile = files.find(f => f.startsWith('code_review_') && f.endsWith('.json'));
 
-            if (mdFile && fs.existsSync(mdFile)) {
-              reportContent += fs.readFileSync(mdFile, 'utf8');
-            } else {
-              reportContent += '✅ Analyse terminée. Aucun problème majeur détecté.';
+            if (!jsonFile || !fs.existsSync(jsonFile)) {
+              console.log('⚠️ Aucun rapport JSON trouvé');
+              return;
             }
 
-            reportContent += '\n\n---\n';
-            reportContent += `🔍 Commit: \`${context.sha.substring(0, 7)}\`\n`;
-            reportContent += `⏰ Analysé le: ${new Date().toLocaleString('fr-FR')}\n`;
-            reportContent += `🤖 Propulsé par Claude Sonnet 4.5`;
+            const reviewData = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
 
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            // Récupérer les fichiers modifiés dans la PR avec leurs lignes changées
+            const prNumber = context.issue.number;
+            const { data: prFiles } = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: reportContent
+              pull_number: prNumber
             });
+
+            // Construire une map des lignes modifiées par fichier
+            const modifiedLines = {};
+            for (const file of prFiles) {
+              const lines = new Set();
+
+              // Parser le patch pour extraire les numéros de lignes modifiées
+              if (file.patch) {
+                const patchLines = file.patch.split('\n');
+                let currentLine = 0;
+
+                for (const line of patchLines) {
+                  if (line.startsWith('@@')) {
+                    // Extraire le numéro de ligne de départ: @@ -x,y +a,b @@
+                    const match = line.match(/\+(\d+)/);
+                    if (match) {
+                      currentLine = parseInt(match[1]);
+                    }
+                  } else if (!line.startsWith('-')) {
+                    // Ligne ajoutée ou contexte (pas supprimée)
+                    if (line.startsWith('+') || line.startsWith(' ')) {
+                      lines.add(currentLine);
+                      currentLine++;
+                    }
+                  }
+                }
+              }
+
+              modifiedLines[file.filename] = lines;
+            }
+
+            console.log('📍 Lignes modifiées par fichier:', Object.entries(modifiedLines).map(([f, lines]) => `${f}: ${lines.size} lignes`));
+
+            const comments = [];
+            const issuesNotOnModifiedLines = [];
+            let summaryBody = '## 🤖 Revue de Code IA - Résumé\n\n';
+
+            // Icônes pour les sévérités
+            const severityIcons = {
+              'critical': '🔴',
+              'high': '🟠',
+              'medium': '🟡',
+              'low': '🔵',
+              'info': 'ℹ️'
+            };
+
+            // Construire les commentaires sur les lignes modifiées uniquement
+            for (const fileReview of reviewData.files || []) {
+              const filePath = fileReview.path;
+              summaryBody += `\n### 📄 ${filePath}\n`;
+              summaryBody += `**Score**: ${fileReview.score || 'N/A'}/10\n\n`;
+
+              const fileModifiedLines = modifiedLines[filePath] || new Set();
+              let inlineCommentCount = 0;
+
+              for (const issue of fileReview.issues || []) {
+                if (issue.line) {
+                  const icon = severityIcons[issue.severity] || '•';
+                  const commentBody = `${icon} **${issue.severity?.toUpperCase() || 'INFO'}** - ${issue.title || 'Problème détecté'}\n\n${issue.description || ''}\n\n${issue.suggestion ? `💡 **Suggestion**: ${issue.suggestion}` : ''}`;
+
+                  // Vérifier si la ligne est dans le diff
+                  if (fileModifiedLines.has(issue.line)) {
+                    comments.push({
+                      path: filePath,
+                      line: issue.line,
+                      side: 'RIGHT',
+                      body: commentBody
+                    });
+                    inlineCommentCount++;
+                  } else {
+                    // Garder pour le résumé
+                    issuesNotOnModifiedLines.push({
+                      file: filePath,
+                      line: issue.line,
+                      icon: icon,
+                      severity: issue.severity,
+                      title: issue.title,
+                      description: issue.description,
+                      suggestion: issue.suggestion
+                    });
+                  }
+                }
+              }
+
+              if (inlineCommentCount > 0) {
+                summaryBody += `📝 ${inlineCommentCount} commentaire(s) posté(s) sur les lignes modifiées\n\n`;
+              }
+
+              if (fileReview.issues?.length === 0) {
+                summaryBody += '✅ Aucun problème détecté\n\n';
+              }
+            }
+
+            // Ajouter les problèmes non commentés inline au résumé
+            if (issuesNotOnModifiedLines.length > 0) {
+              summaryBody += '\n## ⚠️ Autres Problèmes Détectés\n\n';
+              summaryBody += '_Ces problèmes concernent des lignes non modifiées dans cette PR_\n\n';
+
+              for (const issue of issuesNotOnModifiedLines) {
+                summaryBody += `${issue.icon} **${issue.file}:${issue.line}** - ${issue.title}\n`;
+                summaryBody += `${issue.description}\n`;
+                if (issue.suggestion) {
+                  summaryBody += `💡 ${issue.suggestion}\n`;
+                }
+                summaryBody += '\n';
+              }
+            }
+
+            // Ajouter le résumé global
+            if (reviewData.summary) {
+              summaryBody += `\n## 📊 Résumé Global\n\n${reviewData.summary}\n\n`;
+            }
+            if (reviewData.overall_score) {
+              summaryBody += `**Score Global**: ${reviewData.overall_score}/100\n\n`;
+            }
+
+            summaryBody += '\n---\n';
+            summaryBody += `🔍 Commit: \`${context.sha.substring(0, 7)}\`\n`;
+            summaryBody += `⏰ Analysé le: ${new Date().toLocaleString('fr-FR')}\n`;
+            summaryBody += `🤖 Propulsé par Claude Sonnet 4.5`;
+
+            // Créer le review avec commentaires
+            console.log(`📝 Création du review avec ${comments.length} commentaires inline et ${issuesNotOnModifiedLines.length} problèmes dans le résumé`);
+
+            try {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                event: 'COMMENT',
+                body: summaryBody,
+                comments: comments
+              });
+              console.log('✅ Review créé avec succès');
+            } catch (error) {
+              console.log('⚠️ Erreur lors de la création du review avec commentaires:', error.message);
+              console.log('📝 Posting du résumé uniquement en commentaire');
+
+              // Si les commentaires inline échouent, poster uniquement le résumé
+              await github.rest.issues.createComment({
+                issue_number: prNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summaryBody
+              });
+            }
 
       - name: 🔍 Vérifier les problèmes critiques
         if: steps.changed-files.outputs.found == 'true' && inputs.fail-on-critical
